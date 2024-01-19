@@ -112,6 +112,12 @@ It takes a single argument REF, which is a propertized string."
   :group 'org-roam
   :type  '(function))
 
+(defcustom org-roam-ref-prompt-function nil
+  "Function to prompt for ref strings in `org-roam-ref-add'.
+Should take no arguments, prompt the user, and return a string."
+  :group 'org-roam
+  :type 'function)
+
 ;;;; Completion-at-point
 (defcustom org-roam-completion-everywhere nil
   "When non-nil, provide link completion matching outside of Org links."
@@ -230,11 +236,10 @@ populated."
         (t (org-with-wide-buffer
             (while (not (or (org-roam-db-node-p)
                             (bobp)
-                            ;; Handle case where top-level is a heading
-                            (= (funcall outline-level)
-                               (save-excursion
-                                 (org-roam-up-heading-or-point-min)
-                                 (funcall outline-level)))))
+                            (eq (funcall outline-level)
+                                (save-excursion
+                                  (org-roam-up-heading-or-point-min)
+                                  (funcall outline-level)))))
               (org-roam-up-heading-or-point-min))
             (when-let ((id (org-id-get)))
               (org-roam-populate
@@ -251,18 +256,22 @@ Return nil if a node with ID does not exist."
                                     id)) 0)
     (org-roam-populate (org-roam-node-create :id id))))
 
-(defun org-roam-node-from-title-or-alias (s)
+(defun org-roam-node-from-title-or-alias (s &optional nocase)
   "Return an `org-roam-node' for the node with title or alias S.
 Return nil if the node does not exist.
-Throw an error if multiple choices exist."
+Throw an error if multiple choices exist.
+
+If NOCASE is non-nil, the query is case insensitive.  It is case sensitive otherwise."
   (let ((matches (seq-uniq
                   (append
-                   (org-roam-db-query [:select [id] :from nodes
-                                       :where (= title $s1)]
-                                      s)
-                   (org-roam-db-query [:select [node-id] :from aliases
-                                       :where (= alias $s1)]
-                                      s)))))
+	           (org-roam-db-query (vconcat [:select [id] :from nodes
+						        :where (= title $s1)]
+				               (if nocase [ :collate NOCASE ]))
+			              s)
+	           (org-roam-db-query (vconcat [:select [node-id] :from aliases
+						        :where (= alias $s1)]
+				               (if nocase [ :collate NOCASE ]))
+			              s)))))
     (cond
      ((seq-empty-p matches)
       nil)
@@ -1038,7 +1047,9 @@ and when nil is returned the node will be filtered out."
 ;;;; Editing
 (defun org-roam-ref-add (ref)
   "Add REF to the node at point."
-  (interactive "sRef: ")
+  (interactive `(,(if org-roam-ref-prompt-function
+                      (funcall org-roam-ref-prompt-function)
+                    (read-string "Ref: "))))
   (let ((node (org-roam-node-at-point 'assert)))
     (save-excursion
       (goto-char (org-roam-node-point node))
